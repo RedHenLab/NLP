@@ -1,11 +1,11 @@
 #!/usr/bin/python
 #
 # This script annotates lemmas using python-framenet for NLTK 3.0 and the FrameNet 1.5 corpus.
+# It is superceded by seg-FrameNet, which uses Semafor 3.0.
 # 
 #       http://www.nltk.org/howto/framenet.html
 # 
 # Each line is tokenized into sentences and then lemmatized by a local stanford-postagger socket server.
-# It is possible that MBSP's lemmatizer is better -- see FrameNet-02.py -- but we don't know that; we do know it's twice as slow.
 #
 # The list of POSs used in the LUs is:
 # v=verb n=noun a=adj adv=adv prep=prep num=numbers intj=interjection art=article c=conjunction scon=subordinating conjunction
