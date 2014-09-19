@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #
 # This script annotates lemmas using python-framenet for NLTK 3.0 and the FrameNet 1.5 corpus.
-# It is superceded by seg-FrameNet, which uses Semafor 3.0.
+# It is superceded by seg-FrameNet-Semafor and FrameNet-06.py.
 # 
 #       http://www.nltk.org/howto/framenet.html
 # 
