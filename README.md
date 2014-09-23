@@ -14,4 +14,6 @@ Task list
 - [ ] [Multiword expressions tagger](https://github.com/RedHenLab/NLP/issues/1)
 - [ ] [Etiquetador de expresiones multipalabra](https://github.com/RedHenLab/NLP/issues/2)
 
+We are also interested in your suggestions for applications that can annotate a large multimodal corpus -- say, Natural Language Processing applications, or an application that recognizes laughter using [Praat](http://www.fon.hum.uva.nl/praat/), or emotional expressions using [OpenEAR](http://sourceforge.net/projects/openart/), or visual applications using [OpenCV](http://opencv.org/).
+
 [Markdown Cheatsheet](https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet)
