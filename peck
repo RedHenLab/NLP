@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+# Commandline search in tags
+#
+# Written by Mark Turner and Francis Steen, 2014-08-01
+#
+# Changelog:
+#
+#       2014-09-11 Generalize to any primary tag
+#       2014-08-03 Fix counter
+#
+# -----------------------------------------------------------
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Search Widget * * *"
+  echo -e "\n\tSearch for annotations in the NewsScape corpus (2004-06-01 to present)."
+  echo -e "\n\tThe corpus is annotated by Sentiment (SMT_01 and SMT_02), MBSP (POS_01),"
+  echo -e "\tStanford Parts of Speech (POS_02), Named Entities (NER_01), and FrameNet (FRM_01)."
+  echo -e "\n\tYou can pass any valid primary tag to this script to search that annotation set (default POS_01)."
+  echo -e "\tThe parts-of-speech annotations use the Penn Treebank II tag set."
+  echo -e "\n\tThe script searches line by line in .seg or .frm files in the current directory."
+  echo -e "\tTo search files on a particular day, issue \"dday 2014-07-22\"."
+  echo -e "\n\tSyntax (use regular expressions in double quotes):"
+  echo -e "\n\t\t`basename $0` <\"regex search terms\"> <primary tag> <output file> [clobber]"
+  echo -e "\n\tExamples (clobber to overwrite existing file):"
+  echo -e "\n\t\t`basename $0` \"Likelihood\" FRM_01 ~/MyResults.csv clobber"
+  echo -e "\n\tThe output is a comma-separated values file that can be read straight into R:"
+  echo -e "\n\t\tMyR <- read.csv(\"~/MyResults.csv\", sep=\"|\", quote=NULL)"
+  echo -e "\n\tCombine searches in different tags:"
+  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; peck \"likelihood\" FRM_01 ~/Out2 ; sort ~/Out1 ~/Out2 > ~/Out3"
+  echo -e "\n\tTo search a series of days, use the number of days ago:"
+  echo -e "\n\t\tfor D in {23..2} ; do dday \$D ; `basename $0` \"as.*if.*PP\" POS_01 ~/MyResults ; done"
+  echo -e "\n\tThe script will add the current directory name and a timestamp to avoid clobbering.\n"
+   exit
+fi
+
+# Regex search term
+CUE="$1"
+if [ -z "$1" ]
+  then echo -e "\n\tWelcome to the Red Hen Search Widget -- please enter a search term and an output file name!\n" ; exit
+fi ; N=0
+
+# Current directory
+DIR=`pwd`
+
+# Primary tag
+if [ -n "$2" ]
+  then TAG="$2"
+  else TAG="POS_01"
+fi
+
+# File name and header
+if [ -n "$3" ]
+  then OUTFILE="$3"
+    if [ -f "$OUTFILE" -a -z "$4" ]
+      then OUTFILE="$OUTFILE"_${DIR##*/}_$(date +%Y-%m-%d-%H%M%S).csv ; echo -e "\n\tOutput file renamed $OUTFILE to avoid overwriting."
+    fi
+    echo "filename|sentence|clipURL|clip-start|clip-end|$TAG|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word" > $OUTFILE
+  else echo -e "\n\tPlease enter an output file name after the search term.\n" ; exit
+fi ; N=0
+
+# Welcome
+echo -e "\n\tRed Hen goes pecking for '$CUE' among the $TAG annotations in `pwd` ...\n"
+
+# Counter
+C="/tmp/$$.tmp"
+echo 0 > $C
+
+# File loop
+for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
+
+    # Prefer the .frm file
+    if [ -f ${FIL%.*}.frm -a "$FIL" = "${FIL%.*}.seg" ] ; then continue ; fi
+
+    UUID="$(grep ^'UID|' $FIL | cut -d"|" -f2 )"
+
+    # Case insensitive search term
+    egrep -i "$CUE" $FIL | grep $TAG | while read line ; do unset S
+
+        # echo -e "\n\t$line\n"
+
+        # Select some elements from the line, using pipe as delimiter
+        IFS="|" read LINSTART LINEND o TEXT <<< "$line"
+
+        # Get the first timestamp
+        if [ -z "$S" ] ; then S=$LINSTART ; fi
+
+        # Get the baseline time from the filename
+        IFS="_" read FILEDATE FILEHOUR o <<< "$FIL"
+
+        # echo -e "$FILEDATE $FILEHOUR | $S"
+        # 2014-07-29 2300 | 20140729235910.886
+
+        # Convert to valid date strings
+        FILEHOUR=$( echo $FILEHOUR | sed -e 's/^.\{2\}/&:/' )
+        S="${S:0:8} ${S:8:2}:${S:10:2}:${S:12:2}"
+
+        # echo -e "$FILEDATE $FILEHOUR | $S"
+        # 2014-07-29 16:00 | 20140729 16:58:11
+
+        # Convert to unix epoch
+        FILESTART=$( date -ud $FILEDATE\ $FILEHOUR +%s )
+        START=$( date -ud "$S" +%s )
+
+        # echo -e "$FILESTART | $START"
+        # 1406667600 | 1406670360
+
+        # Relative time in seconds
+        RELTIM=$[ START - FILESTART ]
+        # echo -e "$RELTIM"
+
+        # Get the text
+        TEXT="$( grep -m2 "$LINSTART|$LINEND" $FIL | egrep '\|CC[0-9]{1}\||\|TR[0-9]{1}\||\|[0-9]{3}\|' )"
+
+        # Output
+        echo -e "$FIL|$TEXT|https://tvnews.sscnet.ucla.edu/edge/video,$UUID,$RELTIM|$line" | tee -a $OUTFILE
+
+        # Counter echo "$[$(cat $C) + 1]"
+        echo "$[$(cat $C) + 1]" > $C
+
+   done
+
+   m=$[m + $(cat $C)] ; echo 0 > $C
+
+done
+
+unlink "$C"
+
+# Receipt
+if [ -n "$2" ]
+  then echo -e "\n\tRed Hen saved $m instances of '$CUE' in $TAG from $N .frm and .seg files to $OUTFILE\n"
+  else echo -e "\n\tRed Hen found $m instances of '$CUE' in $TAG from $N .frm and .seg files in `pwd`.\n"
+fi
+
+# EOF
