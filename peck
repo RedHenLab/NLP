@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+# ~/Pattern2.6/peck
+#
 # Commandline search in tags
 #
 # Written by Mark Turner and Francis Steen, 2014-08-01
@@ -15,20 +17,26 @@
 if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
   echo -e "\n\t\t* * * Red Hen Commandline Search Widget * * *"
   echo -e "\n\tSearch for annotations in the NewsScape corpus (2004-06-01 to present)."
-  echo -e "\n\tThe corpus is annotated by Sentiment (SMT_01 and SMT_02), MBSP (POS_01),"
+  echo -e "\n\tThe corpus is annotated by Sentiment (SMT_01 and SMT_02), CLiPS MBSP (POS_01),"
   echo -e "\tStanford Parts of Speech (POS_02), Named Entities (NER_01), and FrameNet (FRM_01)."
-  echo -e "\n\tYou can pass any valid primary tag to this script to search that annotation set (default POS_01)."
-  echo -e "\tThe parts-of-speech annotations use the Penn Treebank II tag set."
+  echo -e "\tYou can also search within the unannotated caption text directly (CC1)."
+  echo -e "\tThe parts-of-speech annotations use the Penn Treebank II tag set, see http://www.clips.ua.ac.be/pages/mbsp-tags."
   echo -e "\n\tThe script searches line by line in .seg or .frm files in the current directory."
   echo -e "\tTo search files on a particular day, issue \"dday 2014-07-22\"."
-  echo -e "\n\tSyntax (use regular expressions in double quotes):"
+  echo -e "\n\tSyntax (put the search phrase or regular expression inside double quotes):"
   echo -e "\n\t\t`basename $0` <\"regex search terms\"> <primary tag> <output file> [clobber]"
-  echo -e "\n\tExamples (clobber to overwrite existing file):"
-  echo -e "\n\t\t`basename $0` \"Likelihood\" FRM_01 ~/MyResults.csv clobber"
+  echo -e "\n\tExamples (clobber to overwrite existing file -- note that peck is not case sensitive):"
+  echo -e "\n\t\t`basename $0` \"time\" FRM_01 ~/MyResults.csv clobber      \t(any mention of time in a frame annotation)"
+  echo -e "\t\t`basename $0` \"FRM_01\|TIME\|\" FRM_01 ~/MyResults.csv      \t(only the frame name -- escape the pipe symbol |)"
+  echo -e "\t\t`basename $0` \"SRL\|TIME\|\" FRM_01 ~/MyResults.csv         \t(only the semantic role)"
+  echo -e "\t\t`basename $0` \"\|Measure_duration\" FRM_01 ~/MyResults.csv  \t(only a known frame element"
+  echo -e "\t\t`basename $0` \"a\|[a-zA-Z]+/JJ\" POS_01 ~/MyResults.csv     \t(the indefinite article followed by an adjective"
   echo -e "\n\tThe output is a comma-separated values file that can be read straight into R:"
   echo -e "\n\t\tMyR <- read.csv(\"~/MyResults.csv\", sep=\"|\", quote=NULL)"
-  echo -e "\n\tCombine searches in different tags:"
-  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; peck \"likelihood\" FRM_01 ~/Out2 ; sort ~/Out1 ~/Out2 > ~/Out3"
+  echo -e "\n\tYou can also combine searches in different tags (union of searches, with duplicates removed):"
+  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; `basename $0` \"likelihood\" FRM_01 ~/Out2 ; sort -u ~/Out1 ~/Out2 > ~/Out3"
+  echo -e "\n\tGet the intersection of two searches (can be applied recursively):"
+  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; `basename $0` \"likelihood\" FRM_01 ~/Out2 ; intersect ~/Out1 ~/Out2 ~/Out3"
   echo -e "\n\tTo search a series of days, use the number of days ago:"
   echo -e "\n\t\tfor D in {23..2} ; do dday \$D ; `basename $0` \"as.*if.*PP\" POS_01 ~/MyResults ; done"
   echo -e "\n\tThe script will add the current directory name and a timestamp to avoid clobbering.\n"
@@ -61,7 +69,7 @@ if [ -n "$3" ]
 fi ; N=0
 
 # Welcome
-echo -e "\n\tRed Hen goes pecking for '$CUE' among the $TAG annotations in `pwd` ...\n"
+echo -e "\n\tRed Hen goes looking for '$CUE' among the $TAG annotations in `pwd` ...\n"
 
 # Counter
 C="/tmp/$$.tmp"
@@ -126,6 +134,9 @@ for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
 done
 
 unlink "$C"
+
+# Deduplicate
+sort -u $OUTFILE | sponge $OUTFILE
 
 # Receipt
 if [ -n "$2" ]
