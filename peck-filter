@@ -1,0 +1,112 @@
+#!/bin/bash
+#
+# Filter the the output of a peck search by a second set of search criteria
+#
+# Written by FFS
+#
+# Changelog:
+#
+#       2015-01-10 Filter a search
+#
+# -----------------------------------------------------------
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Search Filter * * *"
+  echo -e "\n\tFilter a peck search result by a second set of search criteria."
+  echo -e "\n\tSee peck -h and peck -h2 for basic instructions."
+  echo -e "\n\tSyntax:"
+  echo -e "\n\t\t`basename $0` <peck search result csv> <file type> <\"regex search terms\"> <primary tag> <output file> [clobber]"
+  echo -e "\n\tExamples (start with a peck search results and refine it):"
+  echo -e "\n\t\t`basename $0` ~/MyResults1.csv seg \"a\|[a-zA-Z]+/JJ\" POS_01 ~/FilteredResults.csv"
+  echo -e "\n\tThe script produces results that match both set of criteria."
+  echo -e "\n\tSee also peck, peck-clip, peck-intersect, and peck-seg.\n"
+   exit
+fi
+
+# Search result file
+if [ -z "$1" ]
+  then echo -e "\nPlease include the filename of peck search result to filter; see `basename $0` -h for usage.\n" ; exit
+  else INFIL="$1"
+fi
+
+# File type
+if [ -z "$2" ]
+  then echo -e "\n\tPlease include file type, a search term, a tag type, and an output file name!\n" ; exit
+  else EXT="$2"
+fi ; N=0
+
+# Regex search term
+if [ -z "$3" ]
+  then echo -e "\n\tPlease include file type, a search term, a tag type, and an output file name!\n" ; exit
+  else CUE="$3"
+fi
+
+# Current directory
+DIR=`pwd` DAT=${DIR##*/}
+
+# Primary tag
+if [ -n "$4" ]
+  then TAG="$4"
+  else TAG="POS_01"
+fi
+
+# Filtered output file
+if [ -n "$5" ]
+  then OUTFIL="$5"
+    if [ -f "$OUTFIL" -a -z "$6" ]
+      then OUTFIL=${OUTFIL}_${DAT}_$(date +%Y-%m-%d-%H%M%S).csv ; echo -e "\n\tOutput file renamed $OUTFIL to avoid overwriting."
+    fi
+  else echo -e "\n\tPlease enter an output file name after the search term.\n" ; exit
+fi ; N=0 max=0
+
+# Clobber?
+if [ -n "$6" ] ; then
+  if [ "$6" = "clobber" ] ; then
+    if [ -f "$OUTFIL" ] ; then rm "$OUTFIL" ; fi
+  fi
+fi
+
+# Working file
+WORK=/tmp/peck-filter-$$
+
+# Welcome
+echo -e "\n\tRed Hen is getting ready to filter the peck search results in $INFIL with a second set of criteria -"
+echo -e "\n\tRed Hen goes looking for '$CUE' among $TAG annotations in $EXT files on $DAT ...\n"
+
+# Number of lines
+LEN="$( cat $INFIL | wc -l )"
+
+#set -xv
+
+# Loop through the lines, skipping the header
+for NUM in `seq 2 $LEN` ; do unset FIL LIN TIM
+
+  LIN="$( sed -n "$NUM p" $INFIL )"
+  IFS="|" read FIL o o o TIM o <<< "$LIN"
+
+  # The first filetype searched was ocr, round down to the nearest minute
+  if [ "${FIL#*.}" = "ocr" ] ; then TIM=${TIM:0:12} ; fi
+
+  # Perform the search
+  HIT="$( peck ${FIL%.*}.$EXT "$CUE" $TAG $WORK clobber | grep $TIM )"
+  if [ "$HIT" ] ; then echo -e "$LIN\n$HIT\n" ; echo "$LIN" >> $OUTFIL ; fi
+
+done
+
+# Deduplicate
+if [ -f $OUTFIL ] ; then sort -u $OUTFIL | sponge $OUTFIL ; else echo -e "\n\tThe search produced no results\n" ; exit ; fi
+
+# Add field header for R
+LIN="$( sed -n "1 p" $INFIL )" ; sed -i "1i$LIN" $OUTFIL
+
+# Display the results
+#cat $OUTFIL
+
+# Clean up
+rm -f $WORK
+
+# Receipt
+echo -e "\n\tRed Hen generated filtered results for $INFIL in $OUTFIL.\n"
+
+# EOF
