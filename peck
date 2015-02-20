@@ -8,88 +8,139 @@
 #
 # Changelog:
 #
+#       2015-02-05 Tighten up text extraction
+#       2015-01-11 Allow search of a single file
+#       2014-10-25 Support any file type
 #       2014-09-11 Generalize to any primary tag
 #       2014-08-03 Fix counter
 #
 # -----------------------------------------------------------
 
-# Help screen
-if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
+# Basic help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" -o "$1" = "-h1" ] ; then
   echo -e "\n\t\t* * * Red Hen Commandline Search Widget * * *"
-  echo -e "\n\tSearch for annotations in the NewsScape corpus (2004-06-01 to present)."
-  echo -e "\n\tThe corpus is annotated by Sentiment (SMT_01 and SMT_02), CLiPS MBSP (POS_01),"
-  echo -e "\tStanford Parts of Speech (POS_02), Named Entities (NER_01), and FrameNet (FRM_01)."
-  echo -e "\tYou can also search within the unannotated caption text directly (CC1)."
-  echo -e "\tThe parts-of-speech annotations use the Penn Treebank II tag set, see http://www.clips.ua.ac.be/pages/mbsp-tags."
-  echo -e "\n\tThe script searches line by line in .seg or .frm files in the current directory."
-  echo -e "\tTo search files on a particular day, issue \"dday 2014-07-22\"."
+  echo -e "\n\tSearch for annotations in the NewsScape corpus (2004-03-01 to present)."
+  echo -e "\n\tThe corpus is annotated along multiple dimensions in different file types:"
+  echo -e "\n\tseg: Sentiment (SMT_01 and SMT_02), CLiPS MBSP (POS_01),Stanford Parts of Speech (POS_02),"
+  echo -e "\t       German Parts of Speech (POS_03), Named Entities (NER_03), and FrameNet (FRM_01)."
+  echo -e "\t       You can also search within the unannotated caption text directly (CC)."
+  echo -e "\t       The parts-of-speech annotations use the Penn Treebank II tag set, see http://www.clips.ua.ac.be/pages/mbsp-tags."
+  echo -e "\n\tocr: On-screen text (OCR1) -- in this case, the sentence field in the output will be empty."
+  echo -e "\n\ttpt: Segment boundaries (SEG), Named Entities (NER_01), some others."
+  echo -e "\n\ttag: Selectively hand-annotated Gestures (GES), Causal reasoning stages (CAU), and others; see"
+  echo -e "\t       https://sites.google.com/site/distributedlittleredhen/home/tutorials-and-educational-resources/how-to-use-the-online-tagging-interface"
+  echo -e "\n\tThe script searches the requested file type in the current directory."
+  echo -e "\n\tTo search files on a particular day, first go to that directory. Navigate like this:"
+  echo -e "\n\t\ttvnews 2014-07-22 or tvnews 5 (five days ago); tvnews + 3 or tvnews - 698 (relative dates)."
   echo -e "\n\tSyntax (put the search phrase or regular expression inside double quotes):"
-  echo -e "\n\t\t`basename $0` <\"regex search terms\"> <primary tag> <output file> [clobber]"
+  echo -e "\n\t\t`basename $0` <file name or type> <\"regex search terms\"> <primary tag> <output file> [clobber]"
   echo -e "\n\tExamples (clobber to overwrite existing file -- note that peck is not case sensitive):"
-  echo -e "\n\t\t`basename $0` \"time\" FRM_01 ~/MyResults.csv clobber      \t(any mention of time in a frame annotation)"
-  echo -e "\t\t`basename $0` \"FRM_01\|TIME\|\" FRM_01 ~/MyResults.csv      \t(only the frame name -- escape the pipe symbol |)"
-  echo -e "\t\t`basename $0` \"SRL\|TIME\|\" FRM_01 ~/MyResults.csv         \t(only the semantic role)"
-  echo -e "\t\t`basename $0` \"\|Measure_duration\" FRM_01 ~/MyResults.csv  \t(only a known frame element"
-  echo -e "\t\t`basename $0` \"a\|[a-zA-Z]+/JJ\" POS_01 ~/MyResults.csv     \t(the indefinite article followed by an adjective"
-  echo -e "\n\tThe output is a comma-separated values file that can be read straight into R:"
-  echo -e "\n\t\tMyR <- read.csv(\"~/MyResults.csv\", sep=\"|\", quote=NULL)"
-  echo -e "\n\tYou can also combine searches in different tags (union of searches, with duplicates removed):"
-  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; `basename $0` \"likelihood\" FRM_01 ~/Out2 ; sort -u ~/Out1 ~/Out2 > ~/Out3"
-  echo -e "\n\tGet the intersection of two searches (can be applied recursively):"
-  echo -e "\n\t\t`basename $0` \"tornado\" POS_01 ~/Out1 ; `basename $0` \"likelihood\" FRM_01 ~/Out2 ; intersect ~/Out1 ~/Out2 ~/Out3"
-  echo -e "\n\tTo search a series of days, use the number of days ago:"
-  echo -e "\n\t\tfor D in {23..2} ; do dday \$D ; `basename $0` \"as.*if.*PP\" POS_01 ~/MyResults ; done"
-  echo -e "\n\tThe script will add the current directory name and a timestamp to avoid clobbering.\n"
+  echo -e "\n\t\t`basename $0` seg \"time\" FRM_01 ~/MyResults.csv clobber      \t(any mention of time in a frame annotation)"
+  echo -e "\t\t`basename $0` ocr \"Obama\" OCR1 ~/MyOCRResults.csv              \t(any mention of Obama in on-screen text)"
+  echo -e "\n\tFor more search examples and advanced operations, see `basename $0` -h2.\n"
    exit
 fi
 
-# Regex search term
-CUE="$1"
+# Advanced help screen
+if [ "$1" = "-h2" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Search Widget -- Advanced * * *"
+  echo -e "\n\tSearch for annotations in the NewsScape corpus (2004-03-01 to present)."
+  echo -e "\n\tSyntax (put the search phrase or regular expression inside double quotes):"
+  echo -e "\n\t\t`basename $0` <file name or type> <\"regex search terms\"> <primary tag> <output file> [clobber]"
+  echo -e "\n\tExamples (clobber to overwrite existing file -- note that peck is case insensitive):"
+  echo -e "\n\t\t`basename $0` seg \"time\" FRM_01 ~/MyResults.csv clobber      \t(any mention of time in a frame annotation)"
+  echo -e "\t\t`basename $0` seg \"FRM_01\|TIME\|\" FRM_01 ~/MyResults.csv      \t(only the frame name -- escape the pipe symbol |)"
+  echo -e "\t\t`basename $0` seg \"SRL\|TIME\|\" FRM_01 ~/MyResults.csv         \t(only the semantic role)"
+  echo -e "\t\t`basename $0` seg \"\|Measure_duration\" FRM_01 ~/MyResults.csv  \t(only a known frame element"
+  echo -e "\t\t`basename $0` seg \"a\|[a-zA-Z]+/JJ\" POS_01 ~/MyResults.csv     \t(the indefinite article followed by an adjective"
+  echo -e "\t\t`basename $0` seg \"\/NNP\|is\/VBZ\|the\/DT\|[a-zA-Z]+\/NNP\|[a-zA-Z]+\/NNP\|of\/IN\|\" POS_02 ~/MyResults.csv"
+  echo -e "\n\tThe output is a comma-separated values file that can be read straight into R:"
+  echo -e "\n\t\tMyR <- read.csv(\"~/MyResults.csv\", sep=\"|\", quote=NULL)"
+  echo -e "\n\tYou can also combine searches in different tags (union of searches, with duplicates removed):"
+  echo -e "\n\t\t`basename $0` seg \"tornado\" POS_01 ~/Out1 ; `basename $0` seg \"likelihood\" FRM_01 ~/Out2 ; sort -u ~/Out1 ~/Out2 > ~/Out3"
+  echo -e "\n\tGet the intersection of two searches (can be applied recursively):"
+  echo -e "\n\t\t`basename $0` seg \"tornado\" POS_01 ~/Out1 ; `basename $0` seg \"likelihood\" FRM_01 ~/Out2 ; peck-intersect ~/Out1 ~/Out2 ~/Out3"
+  echo -e "\n\tTo search a series of days, use the number of days ago and add up the results (union):"
+  echo -e "\n\t\tfor D in {23..2} ; do dday \$D ; `basename $0` seg \"as.*if.*PP\" POS_01 ~/A ; cat ~/A >> ~/MyResults ; rm ~/A ; done"
+  echo -e "\n\tIf you do not clobber, peck will rename the OUTFIL, which also allows you to run concatenate and intersect afterwards:"
+  echo -e "\n\t\tfor D in {23..2} ; do dday \$D ; `basename $0` seg \"as.*if.*PP\" POS_01 ~/MyResults ; done"
+  echo -e "\n\tIn conjunction with peck-intersect, the script can be used to successively refine a construction."
+  echo -e "\n\tThe script will add the current directory name and a timestamp to avoid clobbering.\n"
+  echo -e "\n\tTo search within a certain type of segment only, such as Commercials, use peck-seg."
+  echo -e "\n\tTo filter the results by a second search, use peck-filter."
+  echo -e "\n\tTo create clips from the search results, use peck-clip.\n"
+   exit
+fi
+
+# File name or type
 if [ -z "$1" ]
-  then echo -e "\n\tWelcome to the Red Hen Search Widget -- please enter a search term and an output file name!\n" ; exit
+  then echo -e "\n\tWelcome to the Red Hen Search Widget -- please enter file name or type, a search term, a tag type, and an output file name!\n" ; exit
+  else EXT="$1"
 fi ; N=0
 
+# Regex search term
+if [ -z "$2" ]
+  then echo -e "\n\tWelcome to the Red Hen Search Widget -- please enter file name or type, a search term, a tag type, and an output file name!\n" ; exit
+  else CUE="$2"
+fi
+
 # Current directory
-DIR=`pwd`
+DIR=`pwd` DAT=${DIR##*/}
 
 # Primary tag
-if [ -n "$2" ]
-  then TAG="$2"
+if [ -n "$3" ]
+  then TAG="$3"
   else TAG="POS_01"
 fi
 
 # File name and header
-if [ -n "$3" ]
-  then OUTFILE="$3"
-    if [ -f "$OUTFILE" -a -z "$4" ]
-      then OUTFILE="$OUTFILE"_${DIR##*/}_$(date +%Y-%m-%d-%H%M%S).csv ; echo -e "\n\tOutput file renamed $OUTFILE to avoid overwriting."
+if [ -n "$4" ]
+  then OUTFIL="$4"
+    if [ -f "$OUTFIL" -a -z "$5" ]
+      then OUTFIL=${OUTFIL}_${DAT}_$(date +%Y-%m-%d-%H%M%S).csv ; echo -e "\n\tOutput file renamed $OUTFIL to avoid overwriting."
     fi
-    echo "filename|sentence|clipURL|clip-start|clip-end|$TAG|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word" > $OUTFILE
   else echo -e "\n\tPlease enter an output file name after the search term.\n" ; exit
-fi ; N=0
+fi ; N=0 max=0
+
+# Clobber?
+if [ -n "$5" ] ; then
+  if [ "$5" = "clobber" ] ; then
+    if [ -f "$OUTFIL" ] ; then rm "$OUTFIL" ; fi
+  fi
+fi
 
 # Welcome
-echo -e "\n\tRed Hen goes looking for '$CUE' among the $TAG annotations in `pwd` ...\n"
+echo -e "\n\tRed Hen goes looking for '$CUE' among $TAG annotations in $EXT files on $DAT ...\n"
+
+# Provisional header line for demo purposes
+echo "filename|sentence|clipURL|clip-start|clip-end|$TAG|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word"
 
 # Counter
 C="/tmp/$$.tmp"
 echo 0 > $C
 
-# File loop
-for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
+# File selection
+if [ ${#EXT} -le 4 ] ; then SEL="*.$EXT"
+  elif [ -f $EXT ] ; then SEL="$EXT" EXT=${EXT#*.} ; else echo -e "\n\tFile not present -- $EXT\n" ; exit
+fi
 
-    # Prefer the .frm file
-    if [ -f ${FIL%.*}.frm -a "$FIL" = "${FIL%.*}.seg" ] ; then continue ; fi
+# File loop
+for FIL in `ls -1 $SEL 2>/dev/null` ; do N=$[N+1]
+
+    #echo -e "\tFIL is $FIL"
 
     UUID="$(grep ^'UID|' $FIL | cut -d"|" -f2 )"
 
     # Case insensitive search term
-    egrep -i "$CUE" $FIL | grep $TAG | while read line ; do unset S
+    egrep -i "$CUE" $FIL | grep "|$TAG" | while read line ; do unset S
 
-        # echo -e "\n\t$line\n"
+        #echo -e "\t$line" ; continue
 
         # Select some elements from the line, using pipe as delimiter
-        IFS="|" read LINSTART LINEND o TEXT <<< "$line"
+        IFS="|" read LINSTART LINEND o ANNOTATION <<< "$line"
+
+        #echo -e "$LINSTART | $LINEND | $ANNOTATION"
+        # 20140911015906.727|20140911015909.396|NER_03|PERSON/Danny
 
         # Get the first timestamp
         if [ -z "$S" ] ; then S=$LINSTART ; fi
@@ -102,10 +153,10 @@ for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
 
         # Convert to valid date strings
         FILEHOUR=$( echo $FILEHOUR | sed -e 's/^.\{2\}/&:/' )
-        S="${S:0:8} ${S:8:2}:${S:10:2}:${S:12:2}"
+        S="${S:0:4}-${S:4:2}-${S:6:2} ${S:8:2}:${S:10:2}:${S:12:2}"
 
-        # echo -e "$FILEDATE $FILEHOUR | $S"
-        # 2014-07-29 16:00 | 20140729 16:58:11
+        #echo -e "$FILEDATE $FILEHOUR | $S"
+        # 2014-07-29 16:00 | 2014-07-29 16:58:11
 
         # Convert to unix epoch
         FILESTART=$( date -ud $FILEDATE\ $FILEHOUR +%s )
@@ -119,10 +170,12 @@ for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
         # echo -e "$RELTIM"
 
         # Get the text
-        TEXT="$( grep -m2 "$LINSTART|$LINEND" $FIL | egrep '\|CC[0-9]{1}\||\|TR[0-9]{1}\||\|[0-9]{3}\|' )"
+        TEXT="$( grep -m2 "$LINSTART|$LINEND" $FIL | egrep '^[0-9.]{18}\|[0-9.]{18}\|(CC[0-9]{1}\||TR[0-9]{1}\||[0-9]{3}\|)' | cut -d"|" -f4 )"
 
         # Output
-        echo -e "$FIL|$TEXT|https://tvnews.sscnet.ucla.edu/edge/video,$UUID,$RELTIM|$line" | tee -a $OUTFILE
+        if [ "`basename $0`" != "peck-filter" ] ; then
+           echo -e "$FIL|$TEXT|https://tvnews.sscnet.ucla.edu/edge/video,$UUID,$RELTIM|$line" | tee -a $OUTFIL
+        fi
 
         # Counter echo "$[$(cat $C) + 1]"
         echo "$[$(cat $C) + 1]" > $C
@@ -133,15 +186,28 @@ for FIL in `ls -1 *.{frm,seg} 2>/dev/null` ; do N=$[N+1]
 
 done
 
-unlink "$C"
+# Clean up
+rm $C
 
 # Deduplicate
-sort -u $OUTFILE | sponge $OUTFILE
+if [ -f $OUTFIL ] ; then sort -u $OUTFIL | sponge $OUTFIL ; else echo -e "\n\tThe search produced no results\n" ; exit ; fi
+
+# Generate the right or a reasonable number of fields
+if [ "$max" = "0" -a "$( head -n1 $OUTFIL | grep '|word|' )" = "" ] ; then max=100 ; fi
+
+# Count lines
+#NUM="$( echo $OUTFIL | wc -l )"
+
+# Generate the header line
+HED="filename|sentence|clipURL|clip-start|clip-end|$TAG|$(for i in `seq 1 $max` ; do echo -n 'word|' ; done)"
+
+# Add the header line to the output file
+if [ ! "$( grep filename $OUTFIL )" ] ; then sed -i "1i$HED" $OUTFIL ; fi
 
 # Receipt
-if [ -n "$2" ]
-  then echo -e "\n\tRed Hen saved $m instances of '$CUE' in $TAG from $N .frm and .seg files to $OUTFILE\n"
-  else echo -e "\n\tRed Hen found $m instances of '$CUE' in $TAG from $N .frm and .seg files in `pwd`.\n"
+if [ -n "$3" ]
+  then echo -e "\n\tRed Hen saved $m instances of '$CUE' in $TAG from $N $1 files to $OUTFIL\n" ; sleep 5
+  else echo -e "\n\tRed Hen found $m instances of '$CUE' in $TAG from $N $1 files in `pwd`.\n"
 fi
 
 # EOF
