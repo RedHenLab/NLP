@@ -1,0 +1,84 @@
+#!/bin/bash
+#
+# /usr/local/bin/peck-clip
+#
+# Create a clip from each peck result
+#
+# Written by FFS
+#
+# Changelog:
+#
+#       2014-11-02 Forked from intersect
+#
+# -----------------------------------------------------------
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Clip Creation * * *"
+  echo -e "\n\tGenerate a video clip from each peck search result."
+  echo -e "\n\tSyntax:"
+  echo -e "\n\t\t`basename $0` <input file.csv> <clip duration> <output directory>"
+  echo -e "\n\tThe default duration is 10 seconds."
+  echo -e "\tThe default output directory is ~/Clips."
+  echo -e "\n\tExamples:"
+  echo -e "\n\t\t`basename $0` ~/MyResults1.csv"
+  echo -e "\t\t`basename $0` ~/MyResults1.csv 15 ~/MyClips"
+  echo -e "\n\tBe careful not to generate needlessly large numbers of clips!\n"
+  echo -e "\n\tSee also peck, peck-segment, and extract-frames.\n"
+   exit
+fi
+
+# Search result file
+if [ -z "$1" ]
+  then echo -e "\nPlease include a filename of peck search results; see `basename $0` -h for usage.\n" ; exit
+  else SEED="$1"
+fi
+
+# Clip duration
+if [ -z "$2" ]
+  then DUR=10
+  else DUR="$2"
+fi
+
+# Intersection output file
+if [ -z "$3" ]
+  then OUT=~/Clips ; if [ ! $OUT ] ; then mkdir $OUT ; fi
+  else OUT="$3"
+fi
+
+# Welcome
+echo -e "\n\tRed Hen generates a video clip for each search results in $SEED ...\n"
+
+# Line number
+LEN="$( cat $SEED | wc -l )"
+
+# Verify
+if [ "$LEN" = "0" ] ; then echo -e "\n\tThe file $SEED is empty.\n" ; exit ; fi
+
+# Loop through the lines
+for NUM in `seq 1 $LEN` ; do
+  LIN="$( sed -n "$NUM p" $SEED )"
+
+  # Debug
+  #echo "$LIN"
+
+  # Header
+  if [ "$( echo "$LIN" | grep ^filename )" ] ; then continue ; fi
+
+  # Get the file name and start time
+  IFS="|" read FIL o o o o URL o <<< "$LIN"
+
+  # Verify
+  if [ -f "$OUT/${FIL%.*}_${URL##*,}-$[${URL##*,}+$DUR].mp4" ]
+    then echo -e "\t$OUT/${FIL%.*}_${URL##*,}-$[${URL##*,}+$DUR].mp4 already exists.\n" ; exit
+  fi
+
+  # Create the clip
+  clip ${FIL%.*}.mp4 ${URL##*,}-$[${URL##*,}+$DUR] $OUT
+
+done
+
+# Receipt
+echo -e "\n\tRed Hen generated $[LEN-1] clips from $SEED.\n"
+
+# EOF
