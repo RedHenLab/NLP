@@ -1,0 +1,157 @@
+#!/bin/bash
+#
+# /usr/local/bin/seg-PartsOfSpeech-pattern_de
+#
+# Calls PartsOfSpeech-pattern_de-01.py
+#
+# Written by FFS 2014-07-18  -- development in csa@ca:~/pattern2.6
+#
+# Changelog
+#
+#       2014-12-22 Forked from seg-PartsOfSpeech-stanford
+#       2014-08-12 Forked from seg-NER
+#
+#---------------------------------------------------------------------
+
+# Parsing script and primary tag
+ParseScript=PartsOfSpeech-pattern_de-01.py
+PTAG=POS_03
+SRC=txt  # Source file type
+TMP=pos  # Temporary file type
+TAR=seg  # Target file type
+SCRIPT=`basename $0`
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ]
+ then echo -e "\n\t$SCRIPT <date or daysago> [<partially matching filename>] [clobber]\n"
+  echo -e "\tTag parts of speech in German txt files using pattern.de.\n"
+  echo -e "\tProcess the .$SRC files from seven days ago:\n"
+  echo -e "\t\t$SCRIPT 7 \n"
+  echo -e "\tProcess only ZDF files from a given date, removing any pre-existing $PTAG codes:\n"
+  echo -e "\t\t$SCRIPT 2014-12-20 2213_DE_DasErste_Tagesthemen clobber\n"
+  echo -e "\tUse a for loop to process a series of days (see daysago 2004-03-01):\n"
+  echo -e "\t\tsweep 2013-01-01 ; for i in {1..366} ; do $SCRIPT here _DE_ ; sweep + 1 ; done\n"
+  echo -e "\tThe files are processed in ca:/sweep, the master tree, from which they will be sync'd.\n"
+  echo -e "\tCodebook (Treebank II):\n"
+  echo -e "\t20141219181158.520|20141219181200.160|150|Journalisten unerwünscht."
+  echo -e "\t20141219181158.520|20141219181200.160|POS_03|Journalisten/NNS/B-NP/O/O/journalist|unerwünscht/JJ/B-ADJP/O/O/unerwünscht|././O/O/O/"
+  echo -e "\tStart time|End time|Primary tag(|Word/POS category)*\n"
+   exit
+fi
+
+# Start time
+START="$(date +%s)"
+
+# Hostname
+HOST="$( hostname -s )"
+
+# Which server?
+#if [ "$HOST" != "cartago" ] ; then echo -e "\n\tThe pattern.de program is currently available only on cartago.\n" ; exit ; fi
+
+# Get the date to work on (today's date may change while the script is running)
+if [ "$1" = "here" ] ; then DAY="$( pwd )" DAY=${DAY##*/}
+  elif [ "$(echo $1 | grep '[^0-9]')" = "" ] # if the second parameter is an integer
+    then DAY="$(date -d "-$1 day" +%F)"
+    else DAY="$1"
+fi
+
+# Sanity check
+if [ "$(date -d "$DAY" 2>/dev/null)" = "" ]
+   then echo -e "\n\t$SCRIPT [<date> or #] [<partially matching filename>] [clobber]\n" ; exit
+fi
+
+# Partial file name?
+if [ -z "$2" ]
+  then NAM="_"
+  else NAM="$2"
+fi ; NAM=""$DAY"*"$NAM""
+
+# Generate the date-dependent portion of the path
+DDIR="$(date -d "$DAY" +%Y)/$(date -d "$DAY" +%Y-%m)/$(date -d "$DAY" +%F)"
+
+# Base directory
+if [ "$HOST" = "roma" ] ; then SDIR=/tv/$DDIR ; else SDIR=/sweep/$DDIR ; fi
+
+# Define the trouble log and e-mail recipients
+FAILED="/tmp/$SCRIPT.log"
+TO=`cat /usr/local/bin/e-mail`
+
+# File counter
+NUM=0
+
+# Welcome
+echo -e "\n\tParts of speech tagging with $ParseScript from $SRC to $TAR files on $DAY at $( date )\n"
+
+# Process each text file in turn
+for FIL in $( ls -1 $SDIR/$NAM*.$SRC 2> /dev/null ); do
+
+  # Strip path and extension
+  FIL=${FIL##*/} FIL=${FIL%.*}
+
+  # Check the language
+  if [ ! "$( grep 'LAN|DEU' $SDIR/$FIL.txt )" ] ; then continue ; fi
+
+  # Remove any temporary file
+  rm -f $SDIR/$FIL.$TMP
+
+  # Check for existing $PTAG tags
+  if [ "$( egrep ^"$PTAG" $SDIR/$FIL.$TAR 2>/dev/null )" != "" ] ; then
+      if [ "$3" = "clobber" ] ; then
+            # Tweak as needed to identify the version considered up to date
+            #if [ "$( egrep -m1 $ParseScript $SDIR/$FIL.$TAR | grep $PTAG 2>/dev/null )" != "" ]
+            if [ "$( egrep -m1 $ParseScript $SDIR/$FIL.$TAR | grep nothing 2>/dev/null )" != "" ]
+              then echo -e "\t\t\t$ParseScript annotation $PTAG present in $FIL.$TAR -- skipping" ; continue
+              else echo -en "\t\t\tRe-annotating $PTAG with $ParseScript $FIL.$SRC"
+                 #sed -i "/$PTAG/d" $SDIR/$FIL.$SRC
+                 rm $SDIR/$FIL.$TAR
+            fi
+         else echo -e "\t\t\t$ParseScript $PTAG completed in $FIL.$TAR" ; continue
+      fi
+    else echo -en "\t\t\tAnnotating $PTAG with $ParseScript $FIL.$SRC"
+  fi
+
+  # Get the size of the source file
+  S0="$( stat --format=%s $SDIR/$FIL.$SRC 2>/dev/null )"
+
+  # Background the annotation process to catch hangs
+  $ParseScript $SDIR/$FIL.$SRC > $SDIR/$FIL.$TMP &
+
+  # Get the PID and the start time of the annotation
+  PID=$! AGE="$( date +%s )" ; n=0 ; s=0.1
+
+  # Wait a few seconds for the temporary file to start growing
+  while [ ! -s $SDIR/$FIL.$TMP -a $n -lt 200 ] ; do sleep $s
+    tput cr ; echo -n $( echo "$n * $s" | bc | cut -d"." -f1 ) ; n=$[n+1]
+  done ; S1=0 S2=0 n=0 ; tput sc
+
+  # Terminate if the file stops growing (see margin counter for files that enter this loop)
+  while ps -p $PID > /dev/null ; do
+     S1="$( stat --format=%s $SDIR/$FIL.$TMP 2>/dev/null )" ; sleep 1 ; NOW="$(date +%s)" ; LASTED="$[NOW-$AGE]"
+     S2="$( stat --format=%s $SDIR/$FIL.$TMP 2>/dev/null )" n=$[n+1] ; tput cr ; tput ht ; echo -n $n
+     if [ "$S1" -eq "$S2" -a $n -gt 30 ] ; then kill $PID ; rm -f $SDIR/$FIL.$TMP
+        echo -e "\n\t`date +%F\ %H:%M` \t${SCRIPT%.*} \tNo grow \t$LASTED secs  \t$FIL.$TMP" | tee -a $FAILED.$( date +%F )
+     fi
+  done ; NOW="$(date +%s)" LASTED="$[NOW-$AGE]" LASTED=$(date -ud "+$LASTED seconds"\ $(date +%F) +%M:%S)
+
+  # Check the temporary file
+  S1="$( stat --format=%s $SDIR/$FIL.$TMP 2>/dev/null )"
+  if [ "$S1" -gt "$S0" -a "$( tail -n1 $SDIR/$FIL.$TMP | grep END )" != "" ]
+    then tput rc ; tput ht ; tput ht ; echo "$LASTED"
+       mv $SDIR/$FIL.$TMP $SDIR/$FIL.$TAR
+    else echo -e "\n\t\t\tFailed annotation -- please check $FIL.$SRC" | tee -a $FAILED.$( date +%F ) ; continue
+  fi
+
+  NUM=$[NUM+1]
+
+done
+
+# Sanity check
+if [ "$FIL" = "" ] ; then echo -e "\tUse a partially matching file name -- leave out the date and the extension.\n" ; exit ; fi
+
+# Completion time
+NOW="$(date +%s)" LASTED="$[NOW - $START]" LASTED=$(date -ud "+$LASTED seconds"\ $(date +%F) +%M:%S)
+
+# Receipt
+echo -e "\n\tCompleted annotating $NUM $SRC files to $TAR with $ParseScript in $SDIR ($LASTED)\n"
+
+# EOF
