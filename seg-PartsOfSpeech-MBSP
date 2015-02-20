@@ -1,0 +1,152 @@
+#!/bin/bash
+#
+# /usr/local/bin/seg-PartsOfSpeech-MBSP
+#
+# Calls PartsOfSpeech-MBSP-02.py
+#
+# Written by FFS 2014-07-18
+#
+# Changelog
+#
+#       2014-08-09 PartsOfSpeech-MBSP-03.py with lemma
+#       2014-08-08 Add port argument
+#       2014-08-02 Forked from seg-CLiPS.sh, which included both sentiment and parts of speech
+#       2014-07-30 Add parts of speech annotation, copy to ifsdb tree, renamed to seg-CLiPs.sh
+#       2014-07-28 Add sentence-level sentiment detection, called sentiment-seg
+#
+#---------------------------------------------------------------------
+
+SCRIPT=`basename $0`
+SRC=seg  # Source file type
+TMP=pos1 # Temporary file type
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ]
+ then echo -e "\n\t$SCRIPT <port #> <date or daysago> [<partially matching filename>] [clobber]\n"
+  echo -e "\tAnnotate parts of speech in seg files using CLiPS MBSP 1.4. servers.\n"
+  echo -e "\tAvailable MBSP ports on roma and cartago include 6040, 6050, 6060, 6070, 6080, and 6090.\n"
+  echo -e "\tExamples (port 6060 is multithreaded):\n"
+  echo -e "\tProcess the .$SRC files from seven days ago:\n"
+  echo -e "\t\t$SCRIPT 6060 7 \n"
+  echo -e "\tProcess only Aljazeera files from a given date, removing any pre-existing POS_01 codes:\n"
+  echo -e "\t\t$SCRIPT 6080 2006-12-28 Aljazeera clobber\n"
+  echo -e "\tUse a for loop to process a series of days (see daysago 2004-06-01) -- _ matches all files:\n"
+  echo -e "\t\tsweep 2013-01-01 ; for i in {1..366} ; do $SCRIPT 6050 here ; sweep + 1 ; done (on cartago)\n"
+  echo -e "\t\tday 2004-03-01 ; for i in {3812..2} ; do $SCRIPT 6080 here _ clobber ; day + 1 ; done (on roma)\n"
+  echo -e "\tThe files are processed in ca:/sweep or roma:/tv, the master tree, from which they will be sync'd.\n"
+  echo -e "\tCodebook:\n"
+  echo -e "\t20140710235922.257|20140710235926.928|POS_01|DUDE/NNP/I-NP/O|,/,/O/O|WE/PRP/I-NP/O|HAVE/VBP/I-VP/O|THE/DT/I-NP/O|MUNCHIES/NNS/I-NP/O|!/./O/O"
+  echo -e "\tStart time|End time|Primary tag(|Word parts of speech tags)*\n"
+   exit
+fi
+
+# Get the MBSP port
+if [ -z "$1" ]
+   then echo -e "\n\t$SCRIPT [<port #>] [<date> or #] [<partially matching filename>] [clobber]\n" ; exit
+  elif [ "$(echo $1 | grep '[^0-9]')" = "" ] # if the first parameter is an integer
+   then PORT=$1
+   else echo -e "\n\t$SCRIPT [<port #>] [<date> or #] [<partially matching filename>] [clobber]\n" ; exit
+fi
+
+# Get the date to work on (today's date may change while the script is running)
+if [ "$2" = "here" ] ; then DAY="$( pwd )" DAY=${DAY##*/}
+  elif [ "$(echo $2 | grep '[^0-9]')" = "" ] # if the second parameter is an integer
+    then DAY="$(date -d "-$2 day" +%F)"
+    else DAY="$2"
+fi
+
+# Sanity check
+if [ "$(date -d "$DAY" 2>/dev/null)" = "" ]
+   then echo -e "\n\t$SCRIPT [<port #>] [<date> or #] [<partially matching filename>] [clobber]\n" ; exit
+fi
+
+# Partial file name?
+if [ -z "$3" ]
+  then NAM="_"
+  else NAM="$3"
+fi ; NAM=""$DAY"*"$NAM""
+
+# Start time
+START="$(date +%s)"
+
+# Parsing script
+ParseScript=PartsOfSpeech-MBSP-05.py
+
+# Hostname
+HOST="$( hostname -s )"
+
+# Generate the date-dependent portion of the path
+DDIR="$(date -d "$DAY" +%Y)/$(date -d "$DAY" +%Y-%m)/$(date -d "$DAY" +%F)"
+
+# Base source, and target directories
+if [ "$HOST" = "roma" ] ; then SDIR=/tv/$DDIR ; else SDIR=/sweep/$DDIR ; fi
+
+# Define the trouble log and e-mail recipients
+FAILED="/tmp/seg-PartsOfSpeech-MBSP.log"
+TO=`cat /usr/local/bin/e-mail`
+
+# File counter
+NUM=0
+
+# Welcome
+echo -e "\n\tDetecting parts of speech with MBSP on port $PORT in seg files on $DAY at $( date )\n"
+
+# Process each video file in turn
+for FIL in $( ls -1 $SDIR/$NAM*.$SRC 2> /dev/null ); do
+
+  # Strip path and extension
+  FIL=${FIL##*/} FIL=${FIL%.*}
+
+  # Skip KMEX
+  if [[ $FIL == *_KMEX_* ]] ; then continue ; fi
+
+  # Check for existing POS_01 tags
+  if [ "$( egrep ^'POS_01' $SDIR/$FIL.$SRC )" != "" ] ; then
+      if [ "$4" = "clobber" ] ; then
+            # Tweak as needed to identify the version considered up to date
+            if [ "$( egrep -m1 $ParseScript $SDIR/$FIL.$SRC | grep POS_01 )" != "" ]
+              then echo -e "\t\tMBSP POS_01 present in $FIL.$SRC -- skipping" ; continue
+              else echo -e "\t\tRe-annotating POS_01 with $ParseScript $FIL.$SRC"
+                 sed -i '/POS_01/d' $SDIR/$FIL.$SRC
+            fi
+         else echo -e "\t\tMBSP POS_01 completed in $FIL.$SRC" ; continue
+      fi
+    else echo -e "\t\tAnnotating parts of speech POS_01 with MBSP $FIL.$SRC"
+  fi
+
+  # Welcome
+  $ParseScript $PORT $SDIR/$FIL.$SRC > $SDIR/$FIL.$TMP
+
+  # Verify the file is complete
+  if [ "$( tail -n1 $SDIR/$FIL.$TMP 2>/dev/null | grep END 2>/dev/null )" != "" ]
+    then mv $SDIR/$FIL.$TMP $SDIR/$FIL.$SRC ; NUM=$[NUM+1]
+    else mv $SDIR/$FIL.$TMP $SDIR/$FIL.$SRC-incomplete ; echo -e "\t\t\tIncomplete annotation -- please check $FIL.$SRC-incomplete"
+  fi
+
+  # Make a copy? At the moment, ca:/sweep is roma:/tv!
+  #scp -pq $SDIR/$FIL.$SRC roma:/tv/$DDIR/
+  #scp -pq $SDIR/$FIL.$SRC /db/tv/$DDIR/
+
+ # Failure warning and e-mail (not working?)
+ if [ "$( tail -n1 $SDIR/$FIL.$SRC | grep END )" = "" ]
+    then echo -e "\n\tWARNING -- no END tag in $SDIR/$FIL.$SRC\n" ; sleep 5
+       echo -e "$SDIR/$FIL.$SRC" >> ~/MBSP-Failures.log
+       mail -s "MBSP truncated $SDIR/$FIL.$SRC -- action required" $TO < $FAILED
+    else scp -pq $SDIR/$FIL.$SRC /db/tv/$DDIR/
+  fi
+
+  NUM=$[NUM+1]
+
+done
+
+# Sanity
+if [ "$FIL" = "" ] ; then echo -e "\tUse a partially matching file name -- leave out the date and the extension.\n" ; exit ; fi
+
+# Completion time
+NOW="$(date +%s)" LASTED="$[NOW - $START]" LASTED=$(date -ud "+$LASTED seconds"\ $(date +%F) +%H:%M:%S)
+
+# Receipt
+echo -e "\n\tCompleted annotating parts of speech with MBSP in $NUM seg files in $SDIR ($LASTED)\n"
+
+# EOF
+
