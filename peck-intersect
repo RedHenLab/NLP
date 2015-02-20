@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+# Combine the output of two peck searches
+#
+# Written by FFS
+#
+# Changelog:
+#
+#       2014-10-04 Intersection of two searches
+#
+# -----------------------------------------------------------
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Search Intersection * * *"
+  echo -e "\n\tGenerate the intersection of two peck search results."
+  echo -e "\n\tSyntax:"
+  echo -e "\n\t\t`basename $0` <input file #1> <input file #2> <output file> [clobber]"
+  echo -e "\n\tExamples (clobber to overwrite existing output file):"
+  echo -e "\n\t\t`basename $0` ~/MyResults1.csv ~/MyResults2.csv ~/Intersection.csv"
+  echo -e "\n\tThe script also handles iterative intersections.\n"
+  echo -e "\n\tSee also peck, peck-clip, peck-filter, and peck-seg.\n"
+   exit
+fi
+
+# First search result file
+if [ -z "$1" ]
+  then echo -e "\nPlease include two filenames of peck search results to intersect and an output file; see `basename $0` -h for usage.\n" ; exit
+  else FIL1="$1"
+fi
+
+# Second search result file
+if [ -z "$2" ]
+  then echo -e "\nPlease include a second file to intersect with; see `basename $0` -h for usage.\n" ; exit
+  else FIL2="$2"
+fi
+
+# Intersection output file
+if [ -z "$3" ]
+  then echo -e "\nPlease include an output filename; see `basename $0` -h for usage.\n" ; exit
+  else FIL3="$3"
+fi
+
+# Clobber?
+if [ -n "$4" ] ; then
+  if [ "$4" = "clobber" ] ; then
+    if [ -f "$FIL3" ] ; then rm "$FIL3" ; fi
+  fi
+fi
+
+# Existing file
+if [ -f "$FIL3" ] ; then echo -e "The output file $FIL3 already exists -- add clobber to overwrite.\n" ; exit ; fi
+
+# Welcome
+echo -e "\n\tRed Hen generates the intersection of $FIL1 and $FIL2 search results in `pwd` ...\n"
+
+# Line number
+LEN="$( cat $FIL1 | wc -l )"
+
+# Loop through the lines, skipping the header
+for NUM in `seq 2 $LEN` ; do unset LIN2
+  LIN1="$( sed -n "$NUM p" $FIL1 )"
+  LIN2="$( grep -m1 "${LIN1%|CC*}" $FIL2 )"
+
+  # Write to file
+  if [ "$LIN2" ] ; then echo "$LIN1" >> $FIL3
+    if [ "$LIN2" != "$LIN1" ] ; then echo "$LIN2" >> $FIL3 ; fi
+  fi
+
+done
+
+# Exit if empty intersection
+if [ ! -f $FIL3 ] ; then echo -e "\n\tThere are no shared search results in these two files.\n" ; exit ; fi
+
+# Remove duplicate lines
+sort -u $FIL3 | sponge $FIL3
+
+# Add field header for R
+LIN="$( sed -n "1 p" $FIL1 )" ; sed -i "1i$LIN" $FIL3
+
+# Display the results
+cat $FIL3
+
+# Receipt
+echo -e "\n\tRed Hen generated the intersection of $FIL1 and $FIL2 in $FIL3.\n"
+
+# EOF
