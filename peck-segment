@@ -1,0 +1,197 @@
+#!/bin/bash
+#
+# Commandline search in tags
+#
+# Written by Mark Turner and Francis Steen, 2014-08-01
+#
+# Changelog:
+#
+#       2015-01-11 Allow search of a single file
+#       2014-12-12 Limit search to segment types (fork)
+#       2014-10-25 Support any file type
+#       2014-09-11 Generalize to any primary tag
+#       2014-08-03 Fix counter
+#
+# -----------------------------------------------------------
+
+# Basic help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" -o "$1" = "-h1" ] ; then
+  echo -e "\n\t\t* * * Red Hen Commandline Segment Search Widget * * *"
+  echo -e "\n\tSearch for text or annotations within a segment type in the NewsScape corpus (2004-03-01 to present)."
+  echo -e "\n\tThe corpus is annotated along multiple dimensions in different file types:"
+  echo -e "\n\tseg: Sentiment (SMT_01 and SMT_02), CLiPS MBSP (POS_01),"
+  echo -e "\t     Stanford Parts of Speech (POS_02), Named Entities (NER_03), and FrameNet (FRM_01)."
+  echo -e "\t     You can also search within the unannotated caption text directly (CC)."
+  echo -e "\t     The parts-of-speech annotations use the Penn Treebank II tag set, see http://www.clips.ua.ac.be/pages/mbsp-tags."
+  echo -e "\n\tocr: On-screen text (OCR1)"
+  echo -e "\n\ttpt: Segment boundaries (SEG), Named Entities (NER_01), some others."
+  echo -e "\n\ttag: Selectively hand-annotated Gestures (GES), Causal reasoning stages (CAU), and others; see"
+  echo -e "\t     https://sites.google.com/site/distributedlittleredhen/home/tutorials-and-educational-resources/how-to-use-the-online-tagging-interface"
+  echo -e "\n\tThe script searches the requested file type in the current directory."
+  echo -e "\n\tTo search files on a particular day, first go to that directory. Navigate like this:"
+  echo -e "\n\t\ttvnews 2014-07-22 or tvnews 5 (five days ago); tvnews + 3 or tvnews - 698 (relative dates)."
+  echo -e "\n\tSyntax (put the search phrase or regular expression inside double quotes):"
+  echo -e "\n\t\t`basename $0` <file name or type> <\"regex search terms\"> <primary tag> <output file> [clobber]"
+  echo -e "\n\tOne-day example (clobber to overwrite existing file -- note that peck is not case sensitive):"
+  echo -e "\n\t\t`basename $0` txt Commercial \"calamari\" CC ~/MyResults.csv clobber      \t(any mention of calamari in a commercial)"
+  echo -e "\n\tMulti-day example (go back to June 2007 and look for the iPhone calamari ads for the next 70 days):"
+  echo -e "\n\t\tdday 2007-06-01 ; for D in {1..70} ; do peck-seg txt Commercial \"calamari\" CC ~/peck-seg/calamari-ads.csv ; dday + 1 ; done"
+  echo -e "\n\tConcatenate the files and restore the header for import to R:"
+  echo -e "\n\t\tsort -u *calamari* > b ; tail -n 1 b > a ; head -n -1 b > c ; cat a c > calamari-ads.csv ; rm a b c"
+  echo -e "\n\tSee also peck, peck-filter, peck-intersect, and peck-clip.\n"
+   exit
+fi
+
+# File type
+if [ -z "$1" ]
+  then echo -e "\n\tWelcome to the Red Hen Segment Search Widget -- please enter file name or type, segment type, search term, tag type, and output file name!\n" ; exit
+  else EXT="$1"
+fi ; N=0
+
+# Segment type
+if [ -z "$2" ]
+  then echo -e "\n\tWelcome to the Red Hen Segment Search Widget -- please enter file name or type, segment type, search term, tag type, and output file name!\n" ; exit
+  else SEG="$2"
+fi
+
+# Regex search term
+if [ -z "$3" ]
+  then echo -e "\n\tWelcome to the Red Hen Segment Search Widget -- please enter file name or type, segment type, search term, tag type, and output file name!\n" ; exit
+  else CUE="$3"
+fi
+
+# Current directory
+DIR=`pwd`  DAT=${DIR##*/}
+
+# Primary tag
+if [ -n "$4" ]
+  then TAG="$4"
+  else TAG="POS_01"
+fi
+
+# File name and header
+if [ -n "$5" ]
+  then OUTFIL="$5"
+    if [ -f "$OUTFIL" -a -z "$6" ]
+      then OUTFIL=${OUTFIL}_${DAT}_$(date +%Y-%m-%d-%H%M%S).csv ; echo -e "\n\tOutput file renamed $OUTFIL to avoid overwriting."
+    fi
+  else echo -e "\n\tPlease enter an output file name after the search term.\n" ; exit
+fi ; N=0 max=0
+
+# Clobber?
+if [ -n "$5" ] ; then
+  if [ "$5" = "clobber" ] ; then
+    if [ -f "$OUTFIL" ] ; then rm "$OUTFIL" ; fi
+  fi
+fi
+
+# Welcome
+echo -e "\n\tRed Hen goes looking for '$CUE' among $TAG annotations within segments in $EXT files on $DAT ...\n"
+
+# Provisional header line for demo purposes
+echo "filename|sentence|clipURL|clip-start|clip-end|$TAG|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word|word"
+
+# Counter
+C="/tmp/$$.tmp"
+echo 0 > $C
+
+# File selection
+if [ ${#EXT} -le 4 ] ; then SEL="*.$EXT"
+  elif [ -f $EXT ] ; then SEL="$EXT" EXT=${EXT#*.} ; else echo -e "\n\tFile not present -- $EXT\n" ; exit
+fi
+
+# File loop
+for FIL in `ls -1 $SEL 2>/dev/null` ; do N=$[N+1]
+
+    # Date tree
+    DDIR="$(echo $FIL | sed -rn 's/([0-9]{4})-([0-9]{2})-([0-9]{2}).*/\1\/\1-\2\/\1-\2-\3/p' )"
+
+    UUID="$(grep ^'UID|' $FIL | cut -d"|" -f2 )"
+
+    # Output filename
+    OUT=/mnt/tvnews/segments/$DDIR/${FIL%.*}-$SEG.$EXT
+
+    # Clip out the segment type
+    clip-seg $FIL $SEG $OUT s
+
+    #echo "OUT is $OUT"
+
+    # No segments found
+    if [ ! -f $OUT ] ; then continue ; else echo -e "\tSearching $OUT" ; fi
+
+    # Case insensitive search term
+    egrep -i "$CUE" $OUT | grep "|$TAG" | while read line ; do unset S
+
+        # echo -e "\n\t$line\n"
+
+        # Select some elements from the line, using pipe as delimiter
+        IFS="|" read LINSTART LINEND o TEXT <<< "$line"
+
+        #echo -e "$LINSTART | $LINEND | $TEXT"
+        # 20140911015906.727|20140911015909.396|NER_03|PERSON/Danny
+
+        # Get the first timestamp
+        if [ -z "$S" ] ; then S=$LINSTART ; fi
+
+        # Get the baseline time from the filename
+        IFS="_" read FILEDATE FILEHOUR o <<< "$FIL"
+
+        # echo -e "$FILEDATE $FILEHOUR | $S"
+        # 2014-07-29 2300 | 20140729235910.886
+
+        # Convert to valid date strings
+        FILEHOUR=$( echo $FILEHOUR | sed -e 's/^.\{2\}/&:/' )
+        S="${S:0:4}-${S:4:2}-${S:6:2} ${S:8:2}:${S:10:2}:${S:12:2}"
+
+        # echo -e "$FILEDATE $FILEHOUR | $S"
+        # 2014-07-29 16:00 | 2014-07-29 16:58:11
+
+        # Convert to unix epoch
+        FILESTART=$( date -ud $FILEDATE\ $FILEHOUR +%s )
+        START=$( date -ud "$S" +%s )
+
+        # echo -e "$FILESTART | $START"
+        # 1406667600 | 1406670360
+
+        # Relative time in seconds
+        RELTIM=$[ START - FILESTART ]
+        # echo -e "$RELTIM"
+
+        # Get the text
+        #TEXT="$( grep -m2 "$LINSTART|$LINEND" $FIL | egrep '\|CC[0-9]{1}\||\|TR[0-9]{1}\||\|[0-9]{3}\|' )"
+
+        # Output
+        echo -e "$FIL|$TEXT|https://tvnews.sscnet.ucla.edu/edge/video,$UUID,$RELTIM|$line" | tee -a $OUTFIL
+
+        # Counter echo "$[$(cat $C) + 1]"
+        echo "$[$(cat $C) + 1]" > $C
+
+   done
+
+   m=$[m + $(cat $C)] ; echo 0 > $C
+
+done
+
+unlink "$C"
+
+# Deduplicate
+if [ -f $OUTFIL ] ; then sort -u $OUTFIL | sponge $OUTFIL
+  else echo -e "\n\tNo matches for '$CUE' inside $SEG segments among the $EXT files' $TAG annotations in this directory.\n" ; exit
+fi
+
+# Generate the right or a reasonable number of fields
+if [ "$max" = "0" -a "$( head -n1 $OUTFIL | grep '|word|' )" = "" ] ; then max=100 ; fi
+
+# Generate the header line
+HED="filename|sentence|clipURL|clip-start|clip-end|$TAG|$(for i in `seq 1 $max` ; do echo -n 'word|' ; done)"
+
+# Add the header line to the output file
+if [ ! "$( grep filename $OUTFIL )" ] ; then sed -i "1i$HED" $OUTFIL ; fi
+
+# Receipt
+if [ -n "$4" ]
+  then echo -e "\n\tRed Hen saved $m instances of '$CUE' in $TAG from $N $1 files to $OUTFIL\n" ; sleep 5
+  else echo -e "\n\tRed Hen found $m instances of '$CUE' in $TAG from $N $1 files in `pwd`.\n"
+fi
+
+# EOF
