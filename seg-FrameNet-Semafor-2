@@ -1,0 +1,233 @@
+#!/bin/bash
+#
+# /usr/local/bin/seg-FrameNet
+#
+# Calls FrameNet-06.py -- see also cc-integrate-rongda-segmentation
+#
+# Written by FFS 2014-08-04
+#
+# Changelog
+#
+#       2015-05-30 Keep the JSON output
+#       2015-01-11 Kill PID on timeout
+#       2014-09-10 Rewrite for Semafor
+#       2014-08-04 Forked from seg-PartsOfSpeech
+#
+#---------------------------------------------------------------------
+
+# Key parameters
+ParseScript=FrameNet-06.py
+PTAG=FRM_01   # Primary tag
+SRC=seg       # Source file type
+FRM=frm.json  # JSON output file type
+TAR=seg       # Target file type
+SCRIPT=`basename $0`
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ]
+ then echo -e "\n\t$SCRIPT [<date> or #] [<partially matching filename>] [clobber or manual]\n"
+  echo -e "\tAnnotate semantic frames files using Semafor 3.0-alpha4 with FrameNet 1.5.\n"
+  echo -e "\tUse 'manual' to see verbose output -- requires ctrl-c to terminate hangs.\n"
+  echo -e "\tExamples:\n"
+  echo -e "\tProcess the .$SRC files from seven days ago:\n"
+  echo -e "\t\t$SCRIPT 7 \n"
+  echo -e "\tProcess only Aljazeera files from a given date, removing any pre-existing $PTAG codes:\n"
+  echo -e "\t\t$SCRIPT 2006-12-28 Aljazeera clobber\n"
+  echo -e "\tUse a for loop to process a series of days (see daysago 2004-06-01) -- _ matches all files:\n"
+  echo -e "\t\tsweep 2013-01-01 ; for i in {1..366} ; do $SCRIPT here _ clobber ; sweep + 1 ; done\n"
+  echo -e "\tThe current version of the script is in production and writes to .$TAR files."
+  echo -e "\tThe files are processed in ca:/sweep, where they may be sync'd.\n"
+  echo -e "\tCodebook with example lemma:\n"
+  echo -e "\tStart time|End time|Primary tag|Token|Position|Frame name|Semantic Role Labeling|Token|Position|Frame element"
+  echo -e "\t20140901233124.883|20140901233139.031|"$PTAG"|DECISION|24-25|Deciding|SRL|HER|23-24|Cognizer\n"
+   exit
+fi
+
+# Start time
+START="$(date +%s)"
+
+# Hostname
+HOST="$( hostname -s )"
+
+# The FrameNet repository is currently only on cartago
+if [ "$HOST" != "cartago" ] ; then echo -e "\n\tThe FrameNet repository is currently only on cartago.\n" ; exit ; fi
+
+# Get the date to work on (today's date may change while the script is running)
+if [ "$1" = "here" ] ; then DAY="$( pwd )" DAY=${DAY##*/}
+  elif [ -z "$1" ] ; then DAY="$(date +%F)"
+  elif [ "$(echo $1 | grep '[^0-9]')" = "" ] # if the first parameter is an integer
+    then DAY="$(date -d "-$1 day" +%F)"
+    else DAY="$1"
+fi
+
+# Sanity check
+if [ "$(date -d "$DAY" 2>/dev/null)" = "" ]
+   then echo -e "\n\t$SCRIPT [<date> or #] [<partially matching filename>] [clobber]\n" ; exit
+fi
+
+# Partial file name?
+if [ -z "$2" ]
+  then NAM="_"
+  else NAM="$2"
+fi ; NAM=""$DAY"*"$NAM""
+
+# Generate the date-dependent portion of the path
+DDIR="$(date -d "$DAY" +%Y)/$(date -d "$DAY" +%Y-%m)/$(date -d "$DAY" +%F)"
+
+# Base directory
+if [ "$HOST" = "roma" ] ; then SDIR=/tv/$DDIR ; else SDIR=/sweep/$DDIR ; fi
+
+# Define the trouble log and e-mail recipients
+FAILED="/tmp/$SCRIPT.log"
+TO=`cat /usr/local/bin/e-mail`
+
+# File counter
+NUM=0
+
+# Welcome
+echo -e "\n\tSemantic frame annotation with Semafor 3 in seg files for $DAY on $( date )\n"
+
+# Process each text file in turn
+for FIL in $( ls -1 $SDIR/$NAM*.$SRC 2> /dev/null ); do
+
+  # Clobber?
+  if [ -f ${FIL%.*}.$FRM -a "$3" != "clobber" ] ; then echo -e "\tFile exists -- ${FIL%.*}.$FRM" ; continue ; fi
+
+  # Strip path and extension
+  FIL=${FIL##*/} FIL=${FIL%.*}
+
+  # Skip non-English (does not seem to be needed -- does the python script handle this?)
+  LAN=$( grep ^'LAN|' $SDIR/$FIL.txt ) ; if [ -n "$LAN" ] ; then if [ "${LAN#*|}" != "ENG" ] ; then continue ; fi ; fi
+
+  # Skip KMEX
+  if [[ $FIL == *_KMEX_* ]] ; then continue ; fi
+
+  # Mark incomplete files
+  if [ -f $SDIR/$FIL.$TAR -a "$( tail -n1 $SDIR/$FIL.$TAR 2>/dev/null | grep END 2>/dev/null )" = "" ]
+    then mv $SDIR/$FIL.$TAR $SDIR/$FIL.$TAR-incomplete ; echo -e "\t\t\tIncomplete annotation -- see $FIL.$TAR-incomplete"
+  fi
+
+  # Check for existing $PTAG tags
+  if [ "$( egrep ^"$PTAG" $SDIR/$FIL.$TAR 2>/dev/null )" != "" ] ; then
+      if [ "$3" = "clobber" ] ; then
+            # Tweak as needed to identify the version considered up to date
+            if [ "$( egrep -m1 "$ParseScript" $SDIR/$FIL.$TAR | grep $PTAG 2>/dev/null )" != "" ]
+              then echo -e "\t\t\t$ParseScript annotation $PTAG present in $FIL.$TAR -- skipping" ; continue
+              else echo -en "\t\t\tRe-annotating $PTAG with $ParseScript $FIL.$SRC"
+                if [ "$SRC" = "$TAR" ]
+                  then sed -i "/$PTAG/d" $SDIR/$FIL.$SRC
+                  else rm -r $SDIR/$FIL.$TAR
+                fi
+            fi
+         else echo -e "\t\t\t$ParseScript $PTAG completed in $FIL.$TAR" ; continue
+      fi
+    else echo -en "\t\t\tAnnotating $PTAG with $ParseScript $FIL.$SRC"
+  fi
+
+  # Skip if a recent stripped file exists -- a crude reservation system
+  if [ -f $SDIR/$FIL.stripped ] ; then
+    AGE="$( date -r $SDIR/$FIL.stripped +%s )" ; NOW="$( date +%s )" ; DIFF=$[NOW-AGE]
+    if [ "$DIFF" -lt "600" ] ; then tput cr ; echo -e "\t\t\t$FIL.stripped exists -- skipping                        " ; continue ; fi
+  fi
+
+  # Remove header, tags, and timestamps (include TR1 for Youtube videos)
+  egrep "CC1|CC0|TR0" $SDIR/$FIL.$SRC | sed -r 's/[A-Z0-9\.\|]{3,18}\|//g' > $SDIR/$FIL.stripped
+
+  # Remove chevrons
+  sed -i -r 's/^[>]{1,5}\ ?//g' $SDIR/$FIL.stripped
+
+  # Remove blank lines
+  sed -i '/^\s*$/d' $SDIR/$FIL.stripped
+
+  # Convert to UTF-8
+  iconv -f ISO-8859-1 -t UTF-8 $SDIR/$FIL.stripped | sponge $SDIR/$FIL.stripped
+
+  # Remove if empty
+  if [ $( stat -c%s $SDIR/$FIL.stripped ) = 0 ] ; then rm $SDIR/$FIL.stripped ; echo -e " -- no text" ; continue ; fi
+
+  # Remove any previous temporary file
+  rm -f $SDIR/$FIL.$FRM
+
+  # Get the size of the source file
+  S0="$( stat -c%s $SDIR/$FIL.$SRC 2>/dev/null )"
+
+  # Walk into the Semafor 3 directory to get the right environment (fixme)
+  cd /mnt/tvspare/software/java/semafor-experimental/semafor
+
+  # Annotate the text with Semafor -- source target threads -- and background it to catch hangs
+  if [ "$3" != "manual" ]
+    then ./bin/runSemafor.sh $SDIR/$FIL.stripped $SDIR/$FIL.$FRM 5 &>/dev/null &
+
+      # Get the PID and the start time of the annotation
+      PID=$! AGE="$( date +%s )" ; n=0 ; s=1
+
+      # Wait for the temporary file to start growing (first column margin counter)
+      while [ ! -s $SDIR/$FIL.$FRM -a $n -lt 999 ] ; do
+        tput cr ; echo -n $( echo "$n * $s" | bc | cut -d"." -f1 ) ; sleep $s ; n=$[n+1]
+      done
+
+      # If the file did not get created within the time allotted, move on
+      if [ ! -s $SDIR/$FIL.$FRM ] ; then
+        echo -e "\t`date +%F\ %H:%M` \t${SCRIPT%.*} \tNo $FRM \t$LASTED secs  \t$FIL.seg" >> $FAILED.$( date +%F )
+        echo -e "\t\t\tFAILED -- no $FRM file created for $FIL.$SRC                 "
+        rm -f $SDIR/$FIL.{$FRM,stripped} ; kill $PID 3>&2 2>/dev/null ; continue
+      fi ; S1=0 S2=0 n=0 ; tput sc
+
+      # Terminate if the file stops growing (second column margin counter)
+      while ps -p $PID > /dev/null ; do
+         S1="$( stat -c%s $SDIR/$FIL.$FRM 2>/dev/null )" ; sleep 1 ; NOW="$(date +%s)" ; LASTED="$[NOW-$AGE]"
+         S2="$( stat -c%s $SDIR/$FIL.$FRM 2>/dev/null )" n=$[n+1] ; tput cr ; tput ht ; echo -n $n
+         #echo -e "\nS1 is $S1 and S2 is $S2\n"
+         if [ "$S1" -eq "$S2" -a $n -gt 299 ] ; then kill $PID 3>&2 2>/dev/null
+            echo -e "\t`date +%F\ %H:%M` \t${SCRIPT%.*} \tNo grow \t$LASTED secs  \t$FIL.$FRM" >> $FAILED.$( date +%F )
+            echo -e "\t\t\tFAILED -- $FRM file not growing -- see $FIL.$FRM-incomplete                 "
+            mv $SDIR/$FIL.$FRM $SDIR/$FIL.$FRM-incomplete
+         fi
+      done ; NOW="$(date +%s)" LASTED="$[NOW-$AGE]" LASTED=$(date -ud "+$LASTED seconds"\ $(date +%F) +%M:%S)
+
+      # Receipt
+      tput rc ; tput ht ; tput ht ; echo "$LASTED"
+
+    # Verbose Semafor -- source target threads -- use ctrl-c to get past hangs
+    else ./bin/runSemafor.sh $SDIR/$FIL.stripped $SDIR/$FIL.$FRM 5
+
+  fi
+
+  # Convert the json file
+  if [ -f $SDIR/$FIL.$FRM ]
+    then $ParseScript $SDIR/$FIL.$SRC $SDIR/$FIL.$FRM | sponge $SDIR/$FIL.$TAR
+      # Try again if it fails
+      if [ $( stat -c%s $SDIR/$FIL.$TAR ) -lt $( stat -c%s $SDIR/$FIL.$SRC ) ]
+        then $ParseScript $SDIR/$FIL.$SRC $SDIR/$FIL.$FRM | sponge $SDIR/$FIL.$TAR
+      fi
+      # Verify the file is complete
+      if [ "$( tail -n1 $SDIR/$FIL.$TAR 2>/dev/null | grep END 2>/dev/null )" != "" ]
+        then NUM=$[NUM+1]
+        else mv $SDIR/$FIL.$TAR $SDIR/$FIL.$TAR-incomplete ; echo -e "\t\t\tIncomplete annotation -- please check $FIL.$TAR-incomplete"
+      fi
+    else echo -e "\t\t\tFailed annotation -- please check $FIL.$SRC"
+  fi
+
+  # Add a header?
+
+  # Get the line number of the LBT tag -- it should be the last line in the header
+  LBT=$( $SED -n '/^LBT/=' $FIL | $SED '1q' )
+
+  $SED -n "$BODY,$[END-1]p" $FIL
+  #mv $SDIR/$FIL.$FRM $SDIR/$FIL.frm.json
+
+  # Clean up
+  rm -f $SDIR/$FIL.stripped
+
+done
+
+# Sanity check
+if [ "$FIL" = "" ] ; then echo -e "\tUse a partially matching file name -- leave out the date and the extension.\n" ; exit ; fi
+
+# Completion time
+NOW="$(date +%s)" LASTED="$[NOW - $START]" LASTED=$(date -ud "+$LASTED seconds"\ $(date +%F) +%H:%M:%S)
+
+# Receipt
+echo -e "\n\tCompleted annotating $NUM $SRC files to $TAR with $ParseScript in $SDIR ($LASTED)\n"
+
+# EOF
