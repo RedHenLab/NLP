@@ -1,0 +1,179 @@
+#!/bin/bash
+#
+# /usr/local/bin/cc-integrate-csv
+#
+# Integrate a .csv file into the appropriate .seg files
+#
+# Written 2015-10-25 Red Hen Labs
+#
+# To do: Add some sanity checks
+#
+# History:
+#
+#       2015-10-25 Integrate the gestures coded by Javier Valenzuela Manzanares and Cristóbal Pagán Cánovas
+#
+#--------------------------------------------
+
+# Script name
+SCRIPT=`basename $0`
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ]
+ then echo -e "\n$SCRIPT"
+  echo -e "\n\tIntegrate gesture tags from an Excel file saved to csv into .seg files."
+  echo -e "\tThe script requires a clean .csv file:"
+  echo -e "\t\tRead the Excel file into OpenOffice, LibreOffice, or Excel."
+  echo -e "\t\tSelect File | Save As | File type .csv"
+  echo -e "\t\tIn the Field Options dialogue, set Field delimiter | and Text delimiter \".\n"
+  echo -e "\tThe script currently includes the field names from the Spanish gesture project.\n"
+  echo -e "\tIt can easily be customized to other projects or generalized.\n"
+  echo -e "\tSyntax:\n"
+  echo -e "\t\t$SCRIPT <csv file name>\n"
+  echo -e "\tThe script should be run by user tna on cartago.\n"
+   exit
+fi
+
+# Start time
+START=$( date +%s )
+
+# Log file
+LOG="/home/$USER/$(date "+%Y-%m-%d_%H%M")_$SCRIPT.log"
+
+# Name of file with the data to integrate
+if [ "$1" =  "" ]
+  then echo -e "\n\tPlease give the name of the .csv file to integrate into .seg files.\n" ; exit
+  else SFIL="$1"
+fi
+
+# Verify
+if [ ! -f $SFIL ] ; then echo -e "\n\tUnable to locate $SFIL in `pwd`\n" ; exit ; fi
+
+# Number of lines
+NUMLIN=$( cat $SFIL | wc -l )
+
+# Files changed
+n=0
+
+# Loop -- use 'seq 2' to skip the first line, which by default contains the field names (cf. Receipt below)
+for N in `seq 2 1 $NUMLIN` ; do LIN=`sed -n "$N p" $SFIL`
+
+  # Here you could read the field names from the first line and use them dynamically
+
+  # Customized field names
+  IFS='|' read Lexical_cue Text URL Show Time Gesture_hand Gesture_axis Gesture_direction <<< $LIN
+
+  #echo -e "\tURL is $URL"
+  #echo -e "\tTime is $Time"
+
+  # Separate out the UID and video time
+  UUID=${URL#*,} Lapsed=${UUID#*,} UUID=${UUID%,*}
+
+  # Extract the date
+  TDAT=`egrep -o '20[0,1][0-9]-[0,1][0-9]-[0-3][0-9]' <<< "$Time"`
+
+  echo -e "\tLexical_cue is $Lexical_cue"
+  echo -e "\tTDAT is $TDAT"
+  echo -e "\tUUID is $UUID"
+  echo -e "\tLapsed is $Lapsed"
+  echo -e "\tGesture_hand is $Gesture_hand"
+  echo -e "\tGesture_axis is $Gesture_axis"
+  echo -e "\tGesture_direction is $Gesture_direction"
+
+  DAY="$[$[$(date +%s)-$(date -ud "$TDAT" +%s)]/86400]"
+
+  # Test first in the /db/tv tree before you modify the master collection on /sweep
+  TDIR="/db/tv/$(date -ud "-$DAY day" +%Y)/$(date -ud "-$DAY day" +%Y-%m)/$(date -ud "-$DAY day" +%F)"
+  #TDIR="/sweep/$(date -ud "-$DAY day" +%Y)/$(date -ud "-$DAY day" +%Y-%m)/$(date -ud "-$DAY day" +%F)"
+
+  #echo -e "\tTDIR is $TDIR"
+
+  FFIL=`grep $UUID $TDIR/*txt` ; FFIL=${FFIL%.*} ; FIL=${FFIL##*/}
+
+  echo -e "\tFilename is $FIL.seg\n"
+
+  # Remove previous (clean-up to redo -- make sure you don't clean up more than you can redo)
+  #sed -i '/GES_02/d' $FFIL.seg ; done ; exit
+
+  # Get base time
+  BTIM="$( date -ud "$( echo $FIL | sed -r s/'([0-9]{4}-[0-9]{2}-[0-9]{2})_([0-9]{2})([0-9]{2}).*/\1\ \2:\3:00/' )" +%s)"
+
+  # Add the number of lapsed seconds
+  UnixTagTime=$[ BTIM + Lapsed ]
+
+  # Convert to timestamp
+  TagTime="$( date -ud "$UnixTagTime seconds"\ 1970-01-01 +%Y%m%d%H%M%S )"
+
+  #echo -e "\tTag time is $TagTime\n"
+
+  # File length
+  NumLin="$( cat $FFIL.seg | wc -l )"
+
+  # Counter
+  L=0
+
+  # Examine the file a line at a time
+  for N in `seq 1 $NumLin` ; do
+
+    # Capture the line
+    IFS='|' read S E PTAG o <<< $( sed -n "$N p" $FFIL.seg )
+
+    # Skip to the first line of the main body and write a legend line above it
+    if [ "$L" = "0" ] ; then
+      if [[ "${#S}" = "18" && "$( grep GES_02 $FFIL.seg )" = "" ]] ; then L=1
+        Legend="GES_02|$( date +%Y-%m-%d\ %H:%M)|Method=manual tagging|Source_Person=Cristóbal Pagán Cánovas, Javier Valenzuela Manzanares|Codebook=Frame|Lexical cue|Gesture hand|Gesture axis|Gesture direction"
+        echo -e "\tLegend is $Legend"
+        sed -i ""$N"i$Legend" $FFIL.seg
+      fi
+    fi
+
+    # Skip to caption lines
+    if [[ $PTAG != CC* && $PTAG != TR* ]] ; then continue ; fi
+
+    # Or -- untested -- some European broadcasts use the teletext number as PTAG
+    #if [[ $PTAG != CC* && $PTAG != TR* && $PTAG != [0-9]{3} ]] ; then continue ; fi
+
+    # Walk to tag time
+    if [ ${E%.*} -lt $TagTime ] ; then continue ; fi
+
+    #echo -e "\tStart time is $S"
+    #echo -e "\tEnd time is $E"
+
+    # Convert the start time to unix time
+    UnixStart=$( date -ud "${S:0:8} ${S:8:2}:${S:10:2}:${S:12:2}" +%s )
+    UnixEnd=$( date -ud "${E:0:8} ${E:8:2}:${E:10:2}:${E:12:2}" +%s )
+
+    # Use an interval that is at least ten seconds long for the gesture tag
+    if [ "$[ UnixEnd - UnixStart ]" -lt "10" ] ; then UnixTagEnd=$[ UnixStart + 10 ] ; else UnixTagEnd=$UnixEnd ; fi
+
+    #echo -e "\tUnixTagStart is $UnixStart"
+    #echo -e "\tUnixTagEnd   is $UnixTagEnd"
+
+    TagStart="$( date -ud "$UnixStart seconds"\ 1970-01-01 +%Y%m%d%H%M%S ).${S:15:3}"
+    TagEnd="$( date -ud "$UnixTagEnd seconds"\ 1970-01-01 +%Y%m%d%H%M%S ).333"
+
+    #echo -e "\tTagStart is $TagStart"
+    #echo -e "\tTagEnd   is $TagEnd"
+
+    # Compose the new tag line
+    TAG="$TagStart|$TagEnd|GES_02|Time interval|$Lexical_cue|$Gesture_hand|$Gesture_axis|$Gesture_direction"
+
+    # Avoid duplicates
+    if [ "$( grep "$TAG" $FFIL.seg )" != "" ] ; then break ; fi
+
+    # Insert the tag
+    sed -i ""$N"i$TAG" $FFIL.seg ; n=$[n+1]
+    echo -e "\n$FIL.seg\nhttps://tvnews.sscnet.ucla.edu/edge/video,$UUID,$Lapsed\n$TAG\n" | tee -a $LOG ; break
+
+  done
+
+done
+
+# Receipt
+if [ "$n" -gt "0" ]
+  then echo -e "\n\tThe script changed `grep -c http $LOG` out of $[`cat $SFIL | wc -l`-1] files."
+    echo -e "\tThe changed files are listed in $LOG.\n"
+  else echo -e "\n\tNo files were changed.\n"
+fi
+
+
+# EOF
