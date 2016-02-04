@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% load crispy_forms_tags %}
+{% load staticfiles %}
+
+
+<!-- this stores an empty form html -->
+    <script type="text/html" id="word-template">
+        <div id="item-__prefix__">
+            {% crispy builder.empty_form builder.form.helper %}
+        </div>
+    </script>
+
+{% block content %}
+
+<!-- form body -->
+<form action="/xml/" method="post">
+{% csrf_token %}
+{{ builder.management_form }}
+
+<!-- create a container for all our words -->
+<div id="builder-container">
+
+    <!-- render each word-chunk -->
+    {% for word in builder %}
+
+        <!-- increment div ids -->
+        <div id="word-{{ forloop.counter0 }}">
+
+            <!-- render form using crispy -->
+            {% crispy word %}
+        </div>
+    {% endfor %}
+</div>
+<a href="#" id="add-item-button" class="btn btn-info add-item">Add Item</a>
+</form>
+
+{% endblock %}
