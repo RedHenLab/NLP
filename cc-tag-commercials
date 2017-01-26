@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# /usr/local/bin/cc-tag-commercials
+#
+# Convert caption style information from CCExtractor to segment tags for commercials
+#
+# Called by the recording scripts
+#
+# Written by FFS on 14 Oct 2013
+#
+# Dependencies: sponge (moreutils)
+#
+# Changelog:
+#
+#       2016-09-07 Strip stray spaces before caption style tag
+#       2015-04-12 Corner case -- tag ends in commercial
+#       2014-01-05 Use the start of the next story rather than the end of the POP to define the commercial block
+#
+#------------------------------------------------------------------------------------
+
+# Help screen
+if [ "$1" = "-h" -o "$1" = "--help" -o "$1" = "help" ]
+ then echo -e "\n\tSyntax: `basename $0` <filename>"
+      echo -e "\n\t        `basename $0` 2008-01-30_1830_KNBC_NBC_Nightly_News.txt"
+      echo -e "\n\tConvert caption style information to segment tags for commercials"
+      echo -e "\tand add story start tags before triple chevrons (>>>)."
+      echo -e "\n\tThe original file is given the extension cs (caption styles).\n"
+   exit
+fi
+
+# OSX customizations (use GNU Core Utilities from MacPorts coreutils -- on garuda, GNU is default)
+if [ "$(uname)" = "Darwin" ]
+  then DAT="gdate" SED="gsed" STAT="gstat" SEQ="gseq" MV="gmv" CP="gcp" TEE="gtee"
+  else DAT="date"  SED="sed"  STAT="stat"  SEQ="seq"  MV="mv"  CP="cp"  TEE="tee"
+fi
+
+# Check for flags and assign variables
+if [ -n "$1" ]
+  then FIL="$1"
+  else echo -e "\nUsage: `basename $0` -h\n" ; exit
+fi
+
+# Verify presence
+if [ ! -f $FIL ] ; then echo -e "\n\tNot seeing the file $FIL" ; exit ; fi
+
+# Verify extension
+if [ "${FIL#*.}" != "txt" ] ; then echo -e "\n\tThe `basename $0` script processes .txt files.\n" ; exit ; fi
+
+# Skip files that lack caption styles
+if [ ! "$( egrep -m 1 "\|RU2\||\|RU3\||\|RU4\||\|POP\|" $FIL )" ] ; then echo -e "\tNot seeing caption styles in $FIL" ; exit ; fi
+
+# Welcome
+echo -en "\tCreating commercial and story tags for $FIL\t"
+
+# Host system
+HOST="$( hostname -s )"
+
+# File length
+NLIN="$( cat $FIL | wc -l )"
+
+# Internal field separator
+OFS=$IFS
+
+# Strip extension
+FIL=${FIL%.*}
+
+# Remove extra space after regular caption style (affects The_OReilly_Factor and AlJazeera)
+$SED -i -e 's/RU2|[ ]*/RU2|/' -e 's/RU3|[ ]*/RU3|/' -e 's/RU4|[ ]*/RU4|/' $FIL.txt
+
+# Save the original
+mv $FIL.txt $FIL.cs
+
+# Examine the file a line at a time
+for N in `$SEQ 1 $NLIN` ; do
+
+  # Debug
+ #if [ "$N" -gt "20" ] ; then break ; fi
+
+  # Capture the line
+  read LIN <<< $( $SED -n "$N p" $FIL.cs )
+
+  # At the end of the file
+  if [ "${LIN:0:3}" = "END" ] ; then
+
+    # If we end in the middle of a commercial (corner case)
+    if [ "$SAD" != "" -a "$EAD" != "" ] ; then
+
+      # Use the end time of the last POP line
+      SEG="$SAD|$EAD|SEG_00|Type=Commercial"
+
+      # Insert the commercial block tag before the start
+      $SED -i "1,/^$SAD|$SEAD/ {/^$SAD|$SEAD/i\
+$SEG
+}" $FIL.txt
+      SAD="" ; EAD="" ; echo -en "."
+    fi
+
+    # Write the END line
+    echo -e "$LIN" >> $FIL.txt ; continue
+  fi
+
+  # Keep the lines that start with a letter (header)
+  if [[ "${LIN:0:1}" =~ [A-Z] ]] ; then echo -e "$LIN" >> $FIL.txt ; continue ; fi
+ #if [[ "${LIN:0:1}" =~ [A-Z] ]] ; then echo -e "$LIN" | tee -a $FIL.txt ; continue ; fi
+
+  # Capture the field values in each line (for all other lines) in an array
+  IFS=$'\n' ; FLD=( $( echo "$LIN" | $SED -e 's/|/\n/g' ) )
+
+  # Rewrite non-commercial lines
+  if [ "${FLD[3]}" != "POP" ] ; then
+
+    # Initial story start
+    #if [ -z "$FIRST" ] ; then FIRST=$N ; echo "${FLD[0]}|${FLD[1]}|SEG_00|Type=Story start" >> $FIL.txt
+
+      # Get the starting timestamp of a triple chevron (>>>) indicating a story boundary -- but not in US Spanish files
+      #elif [[ "${FLD[4]}" =~ ">>>" && "${FLD[2]}" != "CC3" && $FIL != *KMEX* ]] ; then echo "${FLD[0]}|${FLD[1]}|SEG_00|Type=Story start" >> $FIL.txt
+      #elif [[ "${FLD[4]}" =~ ">>>" && "${FLD[2]}" != "CC3" ]] ; then echo "${FLD[0]}|${FLD[1]}|SEG_00|Type=Story start" >> $FIL.txt
+
+    #fi
+
+    echo "${FLD[0]}|${FLD[1]}|${FLD[2]}|${FLD[4]}" >> $FIL.txt
+  fi
+
+  # Get the start and end time of the first line of the commercial
+  if [ "${FLD[3]}" = "POP" -a "$SAD" = "" ] ; then SAD="${FLD[0]}" SEAD="${FLD[1]}" ; fi
+
+  # Rewrite the commercial lines and store the successive end times
+  if [ "${FLD[3]}" = "POP" ] ; then echo "${FLD[0]}|${FLD[1]}|${FLD[2]}|${FLD[4]}" >> $FIL.txt ; EAD="${FLD[1]}" ; fi
+
+  # Debug
+  #echo -e "\n\t{FLD[3]} is ${FLD[3]} and EAD is $EAD\n"
+
+  # Get the end of the commercial
+  if [ "${FLD[3]}" != "POP" -a "$EAD" != "" ] ; then
+
+    # Either use the end time of the last POP line
+    #SEG="$SAD|$EAD|SEG_00|Type=Commercial"
+
+    # Or better, the start time of the first non-POP line
+    SEG="$SAD|${FLD[0]}|SEG_00|Type=Commercial"
+
+    # Insert the commercial block tag before the start
+    $SED -i "1,/^$SAD|$SEAD/ {/^$SAD|$SEAD/i\
+$SEG
+}" $FIL.txt
+    SAD="" ; EAD="" ; echo -en "."
+
+    # At the same time, insert a single story start tag at the end of the commercial
+    SEG="${FLD[0]}|${FLD[1]}|SEG_00|Type=Story start"
+    $SED -i "1,/^${FLD[0]}|${FLD[1]}/ {/^${FLD[0]}|${FLD[1]}/i\
+$SEG
+}" $FIL.txt
+
+  fi
+
+done
+
+# Internal field separator
+IFS=$OFS
+
+# Remove duplicate lines (SEG lines after POP and before >>>)
+#uniq $FIL.txt | sponge $FIL.txt
+
+# Receipt
+echo -e "\tdone"
+
+# EOF
